@@ -2,64 +2,37 @@ import pandas as pd
 import sqlite3
 import ast
 
-# Load raw CSV
-df = pd.read_csv("data/raw_intensity.csv")
-print(f"Loaded {len(df)} rows")
-print(df.dtypes)
-print(df.head(3))
+conn = sqlite3.connect("data/energy.db")
 
-# The intensity column is a stringified dict - parse it
+# ─────────────────────────────────────────
+# 1. INTENSITY TABLE
+# ─────────────────────────────────────────
+df = pd.read_csv("data/raw_intensity.csv")
+
+# Parse the intensity dict column
 df['intensity'] = df['intensity'].apply(ast.literal_eval)
 df['intensity_forecast'] = df['intensity'].apply(lambda x: x['forecast'])
 df['intensity_actual']   = df['intensity'].apply(lambda x: x['actual'])
 df['intensity_index']    = df['intensity'].apply(lambda x: x['index'])
 df = df.drop(columns=['intensity'])
 
-# Parse timestamps and rename reserved SQL keywords
-df['from'] = pd.to_datetime(df['from'])
-df['to']   = pd.to_datetime(df['to'])
-df = df.rename(columns={'from': 'time_from', 'to': 'time_to'})
+df['time_from'] = pd.to_datetime(df['from'])
+df['time_to']   = pd.to_datetime(df['to'])
+df = df.drop(columns=['from', 'to'])
 
-print("\nCleaned data:")
-print(df.head(3))
-print(df.dtypes)
-
-# Save to SQLite
-conn = sqlite3.connect("data/energy.db")
 df.to_sql("intensity", conn, if_exists="replace", index=False)
-print(f"\nSaved to SQLite: {len(df)} rows in 'intensity' table")
+print(f"intensity table: {len(df)} rows saved")
 
-# First SQL queries
-print("\n--- Average actual intensity by day ---")
-query = """
-    SELECT DATE(time_from) as day,
-           ROUND(AVG(intensity_actual), 1) as avg_intensity,
-           MIN(intensity_actual) as min_intensity,
-           MAX(intensity_actual) as max_intensity
-    FROM intensity
-    GROUP BY day
-    ORDER BY day
-"""
-result = pd.read_sql(query, conn)
-print(result.to_string())
+# ─────────────────────────────────────────
+# 2. GENERATION MIX TABLE
+# ─────────────────────────────────────────
+dg = pd.read_csv("data/raw_generation.csv")
+dg['time_from'] = pd.to_datetime(dg['time_from'])
+dg['time_to']   = pd.to_datetime(dg['time_to'])
 
-print("\n--- Cleanest vs Dirtiest half-hours ---")
-query2 = """
-    SELECT time_from, intensity_actual, intensity_index
-    FROM intensity
-    ORDER BY intensity_actual ASC
-    LIMIT 5
-"""
-print("Cleanest periods:")
-print(pd.read_sql(query2, conn).to_string())
-
-query3 = """
-    SELECT time_from, intensity_actual, intensity_index
-    FROM intensity
-    ORDER BY intensity_actual DESC
-    LIMIT 5
-"""
-print("\nDirtiest periods:")
-print(pd.read_sql(query3, conn).to_string())
+dg.to_sql("generation", conn, if_exists="replace", index=False)
+print(f"generation table: {len(dg)} rows saved")
+print(f"Fuel columns: {[c for c in dg.columns if c not in ['time_from','time_to']]}")
 
 conn.close()
+print("\nAll data loaded into data/energy.db")
